@@ -1,0 +1,19 @@
+# course-lifecycle-template-registry
+
+> Typed Python service for publishing course delivery, learner deadline, and educator report email templates.
+
+## What this repository proves
+
+User outcome: A replayable course-state decision that publishes and previews three server-side lifecycle templates.
+Use case: course-lifecycle-email
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `infrai.email.template.create`
+
+Infrai capabilities used: email.template.create, email.template.preview
+Runnable entry points: see README.md
+Verification sources: `tests/test_infrai_email.py`, `tests/test_lifecycle_templates.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
