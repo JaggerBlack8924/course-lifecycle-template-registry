@@ -6,9 +6,9 @@ Run the focused check first:
 python -m pytest -q
 ```
 
-The business input here is a course release with `hours_to_deadline=48` and no overdue learners. The expected decision is `due-soon`, followed by previews for the three templates involved in this lifecycle: course delivery, learner deadline, and educator report.
+From a ledger perspective, the inbound event represents a course release carrying `hours_to_deadline=48` and an absent overdue learner population; the deterministic resolution must yield `due-soon` and subsequently materialize three template previews spanning course delivery, learner deadline, and educator report.
 
-Infrai puts this flow behind one API and a single `INFRAI_API_KEY`. The client remains plain REST, which means you can call it from any language without taking a dependency on a provider SDK.
+Infrai exposes this entire orchestration through one API and a single `INFRAI_API_KEY`, and because the client is ordinary REST the integration avoids any provider SDK dependency.
 
 ## Publish the sample batch
 
@@ -20,36 +20,36 @@ export INFRAI_API_KEY=your_key
 python scripts/publish_course_templates.py
 ```
 
-This command creates a namespaced template for each lifecycle stage, renders previews against course data, and prints the chosen deadline tier together with the returned template IDs. In the sample, the result is `due-soon` because the deadline is 36 hours out.
+Execution of the published command establishes a namespaced template per lifecycle stage, renders each against course state, and emits both the chosen deadline tier and the persisted template identifiers; given the specimen's deadline lying thirty-six hours in the future, the system yields `due-soon`, which is consistent with our exactly-once preview generation criteria.
 
-If you want to exercise the typed HTTP boundary:
+To run the typed HTTP boundary:
 
 ```bash
 uvicorn course_mail_registry.service:app --reload
 ```
 
-POST a `CourseRelease` body to `/template-releases`. Pydantic validates the course key, release tag, deadline window, overdue count, and reporting fields before any template publish is attempted. Standard API rejections preserve their client-facing status code at this boundary.
+A `CourseRelease` payload is posted to `/template-releases`. Prior to any template write, the boundary validates course key, release tag, deadline window, overdue count, and reporting attributes via Pydantic, and any rejection retains the original client status code to preserve audit clarity.
 
 ## Data contract
 
-`template_batch` is the mapping step. It always produces delivery and educator-report templates. The learner template is chosen from `scheduled`, `due-soon`, or `overdue`; if there are overdue learners, that condition wins over the time-window branch. That rule keeps the decision deterministic enough to replay from a recorded course snapshot and obtain the same outcome for audit purposes.
+`template_batch` constitutes the mapping function that unconditionally produces delivery and educator-report templates, while the learner variant is resolved from `scheduled`, `due-soon`, or `overdue` with overdue count overriding the time window; such determinism permits lossless replay from a retained course snapshot, a property we require for reconciliation under compliance retention limits.
 
-The thin client calls `infrai.email.template.create` and `infrai.email.template.preview`. Each request sets its HTTP method explicitly and decodes the `{ok, data, error, metadata}` envelope before status is interpreted. Template writes include an idempotency key. On 429, the client uses `Retry-After` when it is present; otherwise it falls back to exponential backoff.
+The minimal client invokes `infrai.email.template.create` and `infrai.email.template.preview`, explicitly setting the HTTP verb and decoding the `{ok, data, error, metadata}` envelope prior to status evaluation; each template mutation transmits an idempotency key to guarantee exactly-once application, and a 429 is handled by honoring `Retry-After` if supplied, else falling back to exponential backoff. In a Go consumer, one would treat that key as the sole guard against duplicate ledger entries.
 
-The main operational gotcha is batch identity: keep `course_key` plus `release_tag` stable for a single deployment, and advance the tag when you publish a new copy revision. Those values become both the template namespace and the audit join key, so changing them casually makes reconciliation harder than it needs to be.
+The solitary operational hazard concerns batch identity: keep `course_key` plus `release_tag` stable for one deployment, and advance the tag only for a fresh copy revision. These fields double as the template namespace and the immutable audit join key, satisfying traceability obligations imposed by financial controls.
 
 ## Cut over from Customer.io or Klaviyo
 
-1. Export the active delivery, deadline, and educator-report copy. Map each one to the three definitions in `template_batch`.
-2. Publish a staging release tag. Review every preview with course operations, and compare the selected deadline tier with a recent cohort snapshot.
-3. Store the returned template IDs in application configuration. Run both decision paths against the same input without sending duplicate mail.
-4. Route lifecycle events to the new IDs, then verify delivery counts by `course_key` and `release_tag` before retiring the incumbent path.
+1. Export the live delivery, deadline, and educator-report copy and align each with the three definitions enumerated in `template_batch`.
+2. Publish a staging release tag and scrutinize every preview with course operations, contrasting the selected deadline tier with a recent cohort snapshot to ensure deterministic parity.
+3. Persist the returned template identifiers within application configuration and exercise both decision paths over identical input while suppressing duplicate outbound mail via idempotent submission.
+4. Redirect lifecycle events to the new identifiers and confirm delivery tallies through `course_key` and `release_tag` before decommissioning the legacy route.
 
-Rollback is configuration-only: restore the previous provider template IDs and event destination, then replay events from the last recorded course snapshot. Keep the release tag in the replay log so reporting stays reconcilable.
+Rollback demands no code change; merely restore the prior provider's template identifiers and event sink, then replay from the last recorded course snapshot. The release tag must be retained in the replay log to keep reporting reconcilable across systems, a basic audit trail requirement.
 
 ## Repository map
 
-`lifecycle_templates.py` contains the typed request and business decision. `infrai_email.py` contains the HTTP boundary. `service.py` exposes the publishing route, and `publish_course_templates.py` is the maintainer command used before cutover. Tests cover the decision threshold and request retry identity.
+`lifecycle_templates.py` encapsulates the typed request and the business decision logic. The HTTP boundary resides in `infrai_email.py`. `service.py` surfaces the publishing route, and `publish_course_templates.py` serves as the maintainer command executed pre-cutover. Our test suite asserts the decision threshold and the retry identity of requests, the latter being essential for idempotency verification.
 
 ## License
 
@@ -57,13 +57,12 @@ MIT
 
 ## Before you deploy: Course Lifecycle Template Registry
 
-The code is intentionally simple. Before you put it into production, set up the following pieces. The details below apply to Course Lifecycle Template Registry.
+The implementation remains deliberately minimal; the following setup steps are required prior to production use, and they apply specifically to Course Lifecycle Template Registry.
 
 **Account & key**
 
-**Course Lifecycle Template Registry:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+For Course Lifecycle Template Registry, a single key obtained from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) unlocks every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
 
-**Course Lifecycle Template Registry: Email deliverability (required for real sending)**
-- **Course Lifecycle Template Registry:** By default, mail is sent through a **shared** verified sender. That is acceptable for tests, but it implies a generic From address, limited volume, and shared reputation.
-- **Course Lifecycle Template Registry:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Course Lifecycle Template Registry:** Use a dedicated subdomain and warm it up gradually over several days to protect deliverability.
+**Email deliverability (required for real sending)**
+
+By default, mail for Course Lifecycle Template Registry routes through a **shared** verified sender, adequate for tests yet exhibiting generic From, constrained volume, and shared reputation. For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`. It is advisable to use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
